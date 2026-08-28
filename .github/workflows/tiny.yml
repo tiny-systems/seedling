@@ -1,0 +1,78 @@
+# The tiny loop, all event-driven, no stored credentials:
+#   issue labeled `tiny`  -> courier job (seconds) delivers it to the root
+#                            session's inbox in the cluster
+#   root session works    -> pushes tiny/issue-N (code) or tiny/reply-N
+#                            (textual answer) using the deploy key
+#   push arrives          -> these jobs (seconds, GitHub's own token) turn
+#                            the push into a PR / an issue comment
+name: tiny
+on:
+  issues:
+    types: [labeled]
+  push:
+    branches: ["tiny/issue-*", "tiny/reply-*"]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  deliver:
+    if: github.event_name == 'issues' && github.event.label.name == 'tiny'
+    runs-on: [self-hosted, tiny]
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      N: ${{ github.event.issue.number }}
+      # Issue title/body are ATTACKER-CONTROLLED: they enter only as env
+      # vars, never interpolated into this script.
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    steps:
+      - name: deliver the issue to the root session
+        run: |
+          {
+            printf 'GitHub issue #%s of %s: %s\n\n' "$N" "$GITHUB_REPOSITORY" "$ISSUE_TITLE"
+            printf '%s\n\n' "$ISSUE_BODY"
+            echo "Handle it end to end. Conventions:"
+            echo "- The repo is in your workspace (SSH remote; deploy key installed)."
+            echo "- Code: branch tiny/issue-$N, clear commits, push — a workflow opens the PR."
+            echo "- Textual answer or blockers: push REPLY.md on branch tiny/reply-$N — a workflow posts it as a comment."
+            echo "- Spawn specialist sessions for other toolchains. Keep your title current. ask_human for real human decisions."
+          } | tiny deliver root --ensure --repo "https://github.com/$GITHUB_REPOSITORY.git"
+      - name: receipt
+        run: gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body "🌱 tiny picked this up — the root session is on it. Code arrives as a PR; answers as comments."
+
+  open-pr:
+    if: github.event_name == 'push' && startsWith(github.ref_name, 'tiny/issue-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: open or update the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          N="${BRANCH#tiny/issue-}"
+          gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && exit 0
+          gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" \
+            --title "tiny: $(gh issue view "$N" --repo "$GITHUB_REPOSITORY" --json title -q .title)" \
+            --body "Closes #$N — opened automatically from the \`$BRANCH\` push."
+          gh issue comment "$N" --repo "$GITHUB_REPOSITORY" \
+            --body "🌱 pull request opened from \`$BRANCH\`."
+
+  reply:
+    if: github.event_name == 'push' && startsWith(github.ref_name, 'tiny/reply-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: post the reply and clean up
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          N="${BRANCH#tiny/reply-}"
+          gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body-file REPLY.md
+          git push origin --delete "$BRANCH"
