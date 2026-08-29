@@ -65,11 +65,18 @@ jobs:
           set -e
           rm -rf outbox && tiny export
           shopt -s nullglob
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           for b in outbox/*.bundle; do
             f=$(basename "$b"); branch="${f#*__}"; branch="${branch%.bundle}"; branch="${branch/tiny-issue-/tiny/issue-}"; branch="${branch/tiny-reply-/tiny/reply-}"
-            git init -q work && cd work
+            # Rebase onto current main: a bundle grown from an older clone
+            # carries an old workflow file in its tree, and job tokens may
+            # not "update" workflow files even incidentally.
+            rm -rf work && git clone -q --depth 50 "$REMOTE" work && cd work
+            git config user.name "tiny" && git config user.email "dev@tinysystems.io"
             git fetch -q "../$b" "$branch"
-            git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "FETCH_HEAD:refs/heads/$branch"
+            git checkout -q -b "$branch" FETCH_HEAD
+            git rebase -q origin/main || { git rebase --abort; echo "::error::$branch does not rebase cleanly onto main — resolve in the session"; cd ..; continue; }
+            git push -f origin "$branch"
             cd .. && rm -rf work
             echo "pushed $branch"
           done
