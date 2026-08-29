@@ -42,7 +42,13 @@ jobs:
             echo "- Spawn specialist sessions for other toolchains. Keep your title current. ask_human for real human decisions."
           } | tiny deliver root --ensure --repo "https://github.com/$GITHUB_REPOSITORY.git"
       - name: receipt
-        run: gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body "🌱 tiny picked this up — the root session is on it. Code arrives as a PR; answers as comments."
+        # curl, not gh: the runner image carries no gh CLI
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$N/comments" \
+            -d '{"body":"🌱 tiny picked this up — the root session is on it. Code arrives as a PR; answers as comments."}' >/dev/null
 
   open-pr:
     if: github.event_name == 'push' && startsWith(github.ref_name, 'tiny/issue-')
