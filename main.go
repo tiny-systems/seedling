@@ -14,7 +14,15 @@ import (
 )
 
 func main() {
-	s := store.New()
+	linksFile := os.Getenv("LINKS_FILE")
+	if linksFile == "" {
+		linksFile = "./links.json"
+	}
+	s, err := store.Load(linksFile)
+	if err != nil {
+		log.Fatalf("loading links from %s: %v", linksFile, err)
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /shorten", func(w http.ResponseWriter, r *http.Request) {
