@@ -78,6 +78,7 @@ jobs:
             git rebase -q origin/main || { git rebase --abort; echo "::error::$branch does not rebase cleanly onto main — resolve in the session"; cd ..; continue; }
             git push -f origin "$branch"
             cd .. && rm -rf work
+            tiny export --ack "${f%.bundle}.bundle"
             echo "pushed $branch"
           done
 
