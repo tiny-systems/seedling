@@ -11,6 +11,9 @@ on:
     types: [labeled]
   push:
     branches: ["tiny/issue-*", "tiny/reply-*"]
+  schedule:
+    - cron: "*/5 * * * *"   # the outbox courier
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -35,12 +38,12 @@ jobs:
           {
             printf 'GitHub issue #%s of %s: %s\n\n' "$N" "$GITHUB_REPOSITORY" "$ISSUE_TITLE"
             printf '%s\n\n' "$ISSUE_BODY"
-            echo "Handle it end to end. Conventions:"
-            echo "- Push credential: read it FRESH each push — TOKEN=\$(cat /tiny-env/GITHUB_TOKEN); push to https://x-access-token:\$TOKEN@github.com/$GITHUB_REPOSITORY.git (tokens rotate; never cache, never put it in the remote URL)."
-            echo "- Code: branch tiny/issue-$N, clear commits, push — a workflow opens the PR."
-            echo "- Textual answer or blockers: push REPLY.md on branch tiny/reply-$N — a workflow posts it as a comment."
+            echo "Handle it end to end. Conventions — you have NO git credentials; the outbox pushes for you:"
+            echo "- Code: commit on branch tiny/issue-$N, then: mkdir -p /workspace/outbox && git bundle create /workspace/outbox/tiny-issue-$N.bundle tiny/issue-$N — it reaches GitHub within ~5 minutes and a PR opens automatically."
+            echo "- Textual answer or blockers: commit REPLY.md on branch tiny/reply-$N and bundle that branch the same way — it becomes an issue comment."
+            echo "- Never try to push or call the GitHub API yourself; the bundle IS the send. One bundle per branch; re-bundle to update."
             echo "- Spawn specialist sessions for other toolchains. Keep your title current. ask_human for real human decisions."
-          } | tiny deliver root --ensure --env "GITHUB_TOKEN=$GH_TOKEN" --repo "https://github.com/$GITHUB_REPOSITORY.git"
+          } | tiny deliver root --ensure --repo "https://github.com/$GITHUB_REPOSITORY.git"
       - name: receipt
         # curl, not gh: the runner image carries no gh CLI
         run: |
@@ -49,6 +52,27 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$N/comments" \
             -d '{"body":"🌱 tiny picked this up — the root session is on it. Code arrives as a PR; answers as comments."}' >/dev/null
+
+  export:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, tiny]
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: push pending outbox bundles
+        run: |
+          set -e
+          rm -rf outbox && tiny export
+          shopt -s nullglob
+          for b in outbox/*.bundle; do
+            f=$(basename "$b"); branch="${f#*__}"; branch="${branch%.bundle}"; branch="${branch/tiny-issue-/tiny/issue-}"; branch="${branch/tiny-reply-/tiny/reply-}"
+            git init -q work && cd work
+            git fetch -q "../$b" "$branch"
+            git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "FETCH_HEAD:refs/heads/$branch"
+            cd .. && rm -rf work
+            echo "pushed $branch"
+          done
 
   open-pr:
     if: github.event_name == 'push' && startsWith(github.ref_name, 'tiny/issue-')
