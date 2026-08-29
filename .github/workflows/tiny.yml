@@ -77,7 +77,31 @@ jobs:
             git checkout -q -b "$branch" FETCH_HEAD
             git rebase -q origin/main || { git rebase --abort; echo "::error::$branch does not rebase cleanly onto main — resolve in the session"; cd ..; continue; }
             git push -f origin "$branch"
-            cd .. && rm -rf work
+            # Token-pushed branches trigger no workflows (recursion guard):
+            # this job finishes the story itself.
+            N="${branch##*-}"
+            API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+            AUTH="Authorization: Bearer ${GH_TOKEN}"
+            case "$branch" in
+              tiny/issue-*)
+                PR=$(curl -sf -H "$AUTH" "$API/pulls?head=${GITHUB_REPOSITORY%%/*}:$branch&state=open" | grep -c '"number"' || true)
+                if [ "$PR" = "0" ]; then
+                  TITLE=$(curl -sf -H "$AUTH" "$API/issues/$N" | python3 -c 'import json,sys; print(json.load(sys.stdin)["title"])')
+                  curl -sf -X POST -H "$AUTH" "$API/pulls"                     -d "{"title":"tiny: $TITLE","head":"$branch","base":"main","body":"Closes #$N — opened by the tiny outbox courier."}" >/dev/null
+                  curl -sf -X POST -H "$AUTH" "$API/issues/$N/comments"                     -d "{"body":"🌱 pull request opened from \`$branch\`."}" >/dev/null
+                fi
+                ;;
+              tiny/reply-*)
+                BODY=$(cd work 2>/dev/null && git show "$branch:REPLY.md" 2>/dev/null || git show "FETCH_HEAD:REPLY.md" 2>/dev/null || echo "🌱 (reply body missing)")
+                printf '%s' "$BODY" > reply_body.txt
+                python3 -c "import json,sys;print(json.dumps({'body':open('reply_body.txt').read()}))" > reply_payload.json
+                curl -sf -X POST -H "$AUTH" "$API/issues/$N/comments" -d @reply_payload.json >/dev/null
+                curl -sf -X DELETE -H "$AUTH" "$API/git/refs/heads/$branch" >/dev/null || true
+                rm -f reply_body.txt reply_payload.json
+                ;;
+            esac
+            cd .. 2>/dev/null || true
+            rm -rf work
             tiny export --ack "${f%.bundle}.bundle"
             echo "pushed $branch"
           done
