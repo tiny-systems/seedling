@@ -84,16 +84,27 @@ jobs:
             AUTH="Authorization: Bearer ${GH_TOKEN}"
             case "$branch" in
               tiny/issue-*)
-                # Create the PR (422 = already exists — fine) and leave the link.
-                curl -s -X POST -H "$AUTH" "$API/pulls" \
+                # Create the PR. 201 opened, 422 already exists; 403 means the
+                # org forbids Actions creating PRs — fail WITHOUT acking so the
+                # bundle retries itself once the toggle is flipped.
+                CODE=$(curl -s -X POST -H "$AUTH" "$API/pulls" \
                   -d "{\"title\":\"tiny: fix issue #$N\",\"head\":\"$branch\",\"base\":\"main\",\"body\":\"Closes #$N - opened by the tiny outbox courier.\"}" \
-                  -o pr.json -w "%{http_code}" > pr_code.txt || true
-                if grep -q '^201$' pr_code.txt; then
-                  PRURL=$(python3 -c "import json;print(json.load(open('pr.json'))['html_url'])" 2>/dev/null || echo "")
-                  curl -s -X POST -H "$AUTH" "$API/issues/$N/comments" \
-                    -d "{\"body\":\"🌱 pull request opened: $PRURL\"}" -o /dev/null || true
-                fi
-                rm -f pr.json pr_code.txt
+                  -o pr.json -w "%{http_code}") || CODE=000
+                echo "PR create for $branch: HTTP $CODE"
+                case "$CODE" in
+                  201)
+                    PRURL=$(python3 -c "import json;print(json.load(open('pr.json'))['html_url'])" 2>/dev/null || echo "")
+                    curl -s -X POST -H "$AUTH" "$API/issues/$N/comments" \
+                      -d "{\"body\":\"🌱 pull request opened: $PRURL\"}" -o /dev/null || true
+                    ;;
+                  422) echo "PR already exists — fine" ;;
+                  403)
+                    echo "::error::GitHub refuses PR creation by Actions. Flip: org Settings → Actions → General → Workflow permissions → 'Allow GitHub Actions to create and approve pull requests'. The branch is pushed; this bundle will retry."
+                    cat pr.json; rm -f pr.json; exit 1
+                    ;;
+                  *) echo "::error::PR create failed (HTTP $CODE)"; cat pr.json; rm -f pr.json; exit 1 ;;
+                esac
+                rm -f pr.json
                 ;;
               tiny/reply-*)
                 BODY_FILE=reply_body.txt
