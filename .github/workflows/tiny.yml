@@ -84,20 +84,24 @@ jobs:
             AUTH="Authorization: Bearer ${GH_TOKEN}"
             case "$branch" in
               tiny/issue-*)
-                PR=$(curl -sf -H "$AUTH" "$API/pulls?head=${GITHUB_REPOSITORY%%/*}:$branch&state=open" | grep -c '"number"' || true)
-                if [ "$PR" = "0" ]; then
-                  TITLE=$(curl -sf -H "$AUTH" "$API/issues/$N" | python3 -c 'import json,sys; print(json.load(sys.stdin)["title"])')
-                  curl -sf -X POST -H "$AUTH" "$API/pulls"                     -d "{"title":"tiny: $TITLE","head":"$branch","base":"main","body":"Closes #$N — opened by the tiny outbox courier."}" >/dev/null
-                  curl -sf -X POST -H "$AUTH" "$API/issues/$N/comments"                     -d "{"body":"🌱 pull request opened from \`$branch\`."}" >/dev/null
+                # Create the PR (422 = already exists — fine) and leave the link.
+                curl -s -X POST -H "$AUTH" "$API/pulls" \
+                  -d "{\"title\":\"tiny: fix issue #$N\",\"head\":\"$branch\",\"base\":\"main\",\"body\":\"Closes #$N - opened by the tiny outbox courier.\"}" \
+                  -o pr.json -w "%{http_code}" > pr_code.txt || true
+                if grep -q '^201$' pr_code.txt; then
+                  PRURL=$(python3 -c "import json;print(json.load(open('pr.json'))['html_url'])" 2>/dev/null || echo "")
+                  curl -s -X POST -H "$AUTH" "$API/issues/$N/comments" \
+                    -d "{\"body\":\"🌱 pull request opened: $PRURL\"}" -o /dev/null || true
                 fi
+                rm -f pr.json pr_code.txt
                 ;;
               tiny/reply-*)
-                BODY=$(cd work 2>/dev/null && git show "$branch:REPLY.md" 2>/dev/null || git show "FETCH_HEAD:REPLY.md" 2>/dev/null || echo "🌱 (reply body missing)")
-                printf '%s' "$BODY" > reply_body.txt
-                python3 -c "import json,sys;print(json.dumps({'body':open('reply_body.txt').read()}))" > reply_payload.json
-                curl -sf -X POST -H "$AUTH" "$API/issues/$N/comments" -d @reply_payload.json >/dev/null
-                curl -sf -X DELETE -H "$AUTH" "$API/git/refs/heads/$branch" >/dev/null || true
-                rm -f reply_body.txt reply_payload.json
+                BODY_FILE=reply_body.txt
+                git show "$branch:REPLY.md" > "../$BODY_FILE" 2>/dev/null || echo "(reply body missing)" > "../$BODY_FILE"
+                ( cd .. && python3 -c "import json;print(json.dumps({'body':open('reply_body.txt').read()}))" > reply_payload.json \
+                  && curl -s -X POST -H "$AUTH" "$API/issues/$N/comments" -d @reply_payload.json -o /dev/null || true )
+                curl -s -X DELETE -H "$AUTH" "$API/git/refs/heads/$branch" -o /dev/null || true
+                rm -f ../reply_body.txt ../reply_payload.json
                 ;;
             esac
             cd .. 2>/dev/null || true
