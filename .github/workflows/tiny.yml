@@ -36,11 +36,11 @@ jobs:
             printf 'GitHub issue #%s of %s: %s\n\n' "$N" "$GITHUB_REPOSITORY" "$ISSUE_TITLE"
             printf '%s\n\n' "$ISSUE_BODY"
             echo "Handle it end to end. Conventions:"
-            echo "- The repo is in your workspace (SSH remote; deploy key installed)."
+            echo "- Push credential: read it FRESH each push — TOKEN=\$(cat /tiny-env/GITHUB_TOKEN); push to https://x-access-token:\$TOKEN@github.com/$GITHUB_REPOSITORY.git (tokens rotate; never cache, never put it in the remote URL)."
             echo "- Code: branch tiny/issue-$N, clear commits, push — a workflow opens the PR."
             echo "- Textual answer or blockers: push REPLY.md on branch tiny/reply-$N — a workflow posts it as a comment."
             echo "- Spawn specialist sessions for other toolchains. Keep your title current. ask_human for real human decisions."
-          } | tiny deliver root --ensure --repo "https://github.com/$GITHUB_REPOSITORY.git"
+          } | tiny deliver root --ensure --env "GITHUB_TOKEN=$GH_TOKEN" --repo "https://github.com/$GITHUB_REPOSITORY.git"
       - name: receipt
         # curl, not gh: the runner image carries no gh CLI
         run: |
