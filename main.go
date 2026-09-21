@@ -23,6 +23,10 @@ func main() {
 			http.Error(w, "url is required", http.StatusBadRequest)
 			return
 		}
+		if err := store.ValidateURL(url); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		code := s.Add(url)
 		fmt.Fprintf(w, "http://%s/%s\n", r.Host, code)
 	})

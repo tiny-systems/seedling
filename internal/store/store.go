@@ -3,9 +3,32 @@
 package store
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"sync"
 )
+
+// ErrInvalidURL is returned by ValidateURL when the given string is not an
+// absolute http(s) URL with a host.
+var ErrInvalidURL = errors.New("url must be an absolute http:// or https:// URL")
+
+// ValidateURL reports whether raw is an absolute URL with an http or https
+// scheme and a host. It rejects unparsable strings, relative references,
+// and other schemes such as javascript:.
+func ValidateURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ErrInvalidURL
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ErrInvalidURL
+	}
+	if u.Host == "" {
+		return ErrInvalidURL
+	}
+	return nil
+}
 
 // Store maps short codes to URLs.
 type Store struct {
