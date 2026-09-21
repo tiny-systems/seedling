@@ -49,16 +49,15 @@ jobs:
       - name: report pending questions
         if: always()
         run: |
+          # curl, not gh: the runner image carries no gh CLI.
           pending=$(tiny questions --json 2>/dev/null || echo '[]')
           [ "$(echo "$pending" | jq 'length')" -eq 0 ] && exit 0
-          {
-            echo "🌱 The agent is waiting on a decision before it can continue."
-            echo
-            echo "$pending" | jq -r '.[] | "- **\(.session)** — \(.text | split("\n")[0])\n  \n  ```\n  \(.answerCommand)\n  ```"'
-            echo
-            echo "_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"
-          } > /tmp/q.md
-          gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body-file /tmp/q.md
+          body=$(echo "$pending" | jq -r '"🌱 The agent is waiting on a decision before it can continue.\n\n" + ([.[] | "- **\(.session)** — \(.text | split("\n")[0])\n  ```\n  \(.answerCommand)\n  ```"] | join("\n")) + "\n\n_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"')
+          jq -n --arg b "$body" '{body:$b}' | curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$N/comments" \
+            -d @- >/dev/null
 
       - name: receipt
         # curl, not gh: the runner image carries no gh CLI
@@ -81,23 +80,18 @@ jobs:
       - name: report pending questions
         if: always()
         run: |
+          # curl, not gh: the runner image carries no gh CLI.
           pending=$(tiny questions --json 2>/dev/null || echo '[]')
-          echo "$pending" | jq -r '.[] | select(.origin | startswith("github:")) | @base64' | while read -r row; do
-            q=$(echo "$row" | base64 -d)
+          echo "$pending" | jq -c '.[] | select((.origin // "") | startswith("github:"))' | while read -r q; do
             origin=$(echo "$q" | jq -r .origin)
-            repo=${origin#github:}; issue=${repo##*#}; repo=${repo%%#*}
+            rest=${origin#github:}; issue=${rest##*#}; repo=${rest%%#*}
             [ "$repo" = "$GITHUB_REPOSITORY" ] || continue
-            {
-              echo "🌱 **$(echo "$q" | jq -r .session)** is waiting on a decision:"
-              echo
-              echo "> $(echo "$q" | jq -r '.text | split("\n")[0]')"
-              echo
-              echo '```'
-              echo "$q" | jq -r .answerCommand
-              echo '```'
-              echo
-              echo "_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"
-            } | gh issue comment "$issue" --repo "$repo" --body-file -
+            body=$(echo "$q" | jq -r '"🌱 **\(.session)** is waiting on a decision:\n\n> \(.text | split("\n")[0])\n\n```\n\(.answerCommand)\n```\n\n_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"')
+            jq -n --arg b "$body" '{body:$b}' | curl -sf -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$repo/issues/$issue/comments" \
+              -d @- >/dev/null
           done
 
       - name: push pending outbox bundles
