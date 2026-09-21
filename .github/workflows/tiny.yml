@@ -42,6 +42,23 @@ jobs:
             echo "- Never try to push or call the GitHub API yourself; the bundle IS the send. One bundle per branch; re-bundle to update."
             echo "- Spawn specialist sessions for other toolchains. Keep your title current. ask_human for real human decisions."
           } | tiny deliver root --ensure --repo "https://github.com/$GITHUB_REPOSITORY.git"
+      # Anything the agent is already blocked on goes onto the issue, so a
+      # stuck session is visible without anyone watching a terminal. tiny
+      # knows nothing about GitHub: it prints JSON, this step formats it.
+      - name: report pending questions
+        if: always()
+        run: |
+          pending=$(tiny questions --json 2>/dev/null || echo '[]')
+          [ "$(echo "$pending" | jq 'length')" -eq 0 ] && exit 0
+          {
+            echo "🌱 The agent is waiting on a decision before it can continue."
+            echo
+            echo "$pending" | jq -r '.[] | "- **\(.session)** — \(.text | split("\n")[0])\n  \n  ```\n  \(.answerCommand)\n  ```"'
+            echo
+            echo "_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"
+          } > /tmp/q.md
+          gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body-file /tmp/q.md
+
       - name: receipt
         # curl, not gh: the runner image carries no gh CLI
         run: |
