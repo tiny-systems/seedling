@@ -41,7 +41,8 @@ jobs:
             echo "- Textual answer or blockers: commit REPLY.md on branch tiny/reply-$N and bundle that branch the same way — it becomes an issue comment."
             echo "- Never try to push or call the GitHub API yourself; the bundle IS the send. One bundle per branch; re-bundle to update."
             echo "- Spawn specialist sessions for other toolchains. Keep your title current. ask_human for real human decisions."
-          } | tiny deliver root --ensure --repo "https://github.com/$GITHUB_REPOSITORY.git"
+          } | tiny deliver root --ensure --repo "https://github.com/$GITHUB_REPOSITORY.git" \
+            --origin "github:$GITHUB_REPOSITORY#$N"
       # Anything the agent is already blocked on goes onto the issue, so a
       # stuck session is visible without anyone watching a terminal. tiny
       # knows nothing about GitHub: it prints JSON, this step formats it.
@@ -75,6 +76,30 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # Every courier run doubles as a check for blocked sessions. A
+      # question raised mid-run has nothing else watching for it.
+      - name: report pending questions
+        if: always()
+        run: |
+          pending=$(tiny questions --json 2>/dev/null || echo '[]')
+          echo "$pending" | jq -r '.[] | select(.origin | startswith("github:")) | @base64' | while read -r row; do
+            q=$(echo "$row" | base64 -d)
+            origin=$(echo "$q" | jq -r .origin)
+            repo=${origin#github:}; issue=${repo##*#}; repo=${repo%%#*}
+            [ "$repo" = "$GITHUB_REPOSITORY" ] || continue
+            {
+              echo "🌱 **$(echo "$q" | jq -r .session)** is waiting on a decision:"
+              echo
+              echo "> $(echo "$q" | jq -r '.text | split("\n")[0]')"
+              echo
+              echo '```'
+              echo "$q" | jq -r .answerCommand
+              echo '```'
+              echo
+              echo "_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"
+            } | gh issue comment "$issue" --repo "$repo" --body-file -
+          done
+
       - name: push pending outbox bundles
         run: |
           set -e
