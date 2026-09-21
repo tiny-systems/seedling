@@ -16,3 +16,26 @@ func TestGetUnknownCode(t *testing.T) {
 		t.Fatal("unknown code resolved")
 	}
 }
+
+func TestValidateURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"javascript scheme rejected", "javascript:alert(1)", true},
+		{"not a url", "hello", true},
+		{"valid https url", "https://example.com/x", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateURL(tc.url)
+			if tc.wantErr && err == nil {
+				t.Fatalf("ValidateURL(%q) = nil, want error", tc.url)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidateURL(%q) = %v, want nil", tc.url, err)
+			}
+		})
+	}
+}
