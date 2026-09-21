@@ -11,8 +11,6 @@ on:
     types: [labeled]
   push:
     branches: ["tiny/issue-*", "tiny/reply-*"]
-  schedule:
-    - cron: "*/5 * * * *"   # the outbox courier
   workflow_dispatch: {}
 
 permissions:
