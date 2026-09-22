@@ -52,7 +52,11 @@ jobs:
           # curl, not gh: the runner image carries no gh CLI.
           pending=$(tiny questions --json 2>/dev/null || echo '[]')
           [ "$(echo "$pending" | jq 'length')" -eq 0 ] && exit 0
-          body=$(echo "$pending" | jq -r '"🌱 The agent is waiting on a decision before it can continue.\n\n" + ([.[] | "- **\(.session)** — \(.text | split("\n")[0])\n  ```\n  \(.answerCommand)\n  ```"] | join("\n")) + "\n\n_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"')
+          body=$(echo "$pending" | jq -r '
+            def clip: if (. | length) > 600 then (.[0:600] + "…") else . end;
+            "🌱 The agent is waiting on a decision before it can continue.\n\n"
+            + ([.[] | "**\(.session)**\n\n```\n" + (.text | clip) + "\n```\n\n`\(.answerCommand)`"] | join("\n\n---\n\n"))
+            + "\n\n_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"')
           jq -n --arg b "$body" '{body:$b}' | curl -sf -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
@@ -86,7 +90,14 @@ jobs:
             origin=$(echo "$q" | jq -r .origin)
             rest=${origin#github:}; issue=${rest##*#}; repo=${rest%%#*}
             [ "$repo" = "$GITHUB_REPOSITORY" ] || continue
-            body=$(echo "$q" | jq -r '"🌱 **\(.session)** is waiting on a decision:\n\n> \(.text | split("\n")[0])\n\n```\n\(.answerCommand)\n```\n\n_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"')
+            body=$(echo "$q" | jq -r '
+              def clip: if (. | length) > 1200 then (.[0:1200] + "\n…(truncated — see the full question with tiny attach)") else . end;
+              "🌱 **\(.session)** is waiting on a decision.\n\n"
+              + "```\n" + (.text | clip) + "\n```\n\n"
+              + (if (.options // [] | length) > 0 then "Options: " + ([.options[] | "`" + . + "`"] | join(" · ")) + "\n\n" else "" end)
+              + "Answer it:\n```\n\(.answerCommand)\n```\n"
+              + "See what it is doing first:\n```\ntiny attach \(.session)\n```\n\n"
+              + "_Answering runs the action with **your** credentials, so it needs a terminal with cluster access — not a reply here._"')
             jq -n --arg b "$body" '{body:$b}' | curl -sf -X POST \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
