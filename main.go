@@ -9,16 +9,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/tiny-systems/seedling/internal/store"
 )
 
-func main() {
-	s := store.New()
+func newMux(s *store.Store) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /shorten", func(w http.ResponseWriter, r *http.Request) {
-		url := r.FormValue("url")
+		url := strings.TrimSpace(r.FormValue("url"))
 		if url == "" {
 			http.Error(w, "url is required", http.StatusBadRequest)
 			return
@@ -35,6 +35,13 @@ func main() {
 		}
 		http.Redirect(w, r, url, http.StatusFound)
 	})
+
+	return mux
+}
+
+func main() {
+	s := store.New()
+	mux := newMux(s)
 
 	addr := ":8080"
 	if p := os.Getenv("PORT"); p != "" {
